@@ -6,21 +6,25 @@ const SALT_ROUNDS = 11;
 
 async function RegisterUser (req, res){
     const { email, password } = req.body;
+    const projectId = req.project.id;
+    if(!projectId){
+        return res.status(403).json({error: "FORBIDDEN"});
+    }
 
-    if(!email || !password || password.length <= 8){
+    if(!email || !password || password.length < 8){
         return res.status(400).json({error: "INVALID_DATA"});
     }
 
     const normalizedEmail = email.toLowerCase().trim();
     try {
-        const result = await db.query("SELECT id FROM users WHERE email = $1", [normalizedEmail]);
+        const result = await db.query("SELECT id FROM users WHERE email = $1 and project_id=$2", [normalizedEmail, projectId]);
         if(result.rows.length > 0){
             return res.status(409).json({error: "EMAIL_ALREADY_EXISTS"});
         }
 
         const passwordhash = await bcrypt.hash(password, SALT_ROUNDS);
 
-        await db.query("INSERT INTO users (email, password_hashed) VALUES ($1, $2)", [normalizedEmail, passwordhash]);
+        await db.query("INSERT INTO users (email, password_hashed, project_id) VALUES ($1, $2, $3)", [normalizedEmail, passwordhash, projectId]);
 
         return res.status(201).json({message : "USER_REGISTERED"});
 
@@ -69,7 +73,7 @@ async function LoginUser (req, res) {
     }
 }
 
-async function refreshAccessToken (req, res) {
+async function RefreshAccessToken (req, res) {
     const incomingRefreshToken = req.body.refreshToken;
     if(!incomingRefreshToken){
         return res.status(401).json({error: "UNAUTHORISED_ACCESS"});
@@ -128,5 +132,5 @@ module.exports ={
     RegisterUser,
     LoginUser,
     LogoutUser,
-    refreshAccessToken
+    RefreshAccessToken
 }
