@@ -10,7 +10,7 @@ async function RegisterUser (req, res){
     if(!projectId){
         return res.status(403).json({error: "FORBIDDEN"});
     }
-
+    
     if(!email || !password || password.length < 8){
         return res.status(400).json({error: "INVALID_DATA"});
     }
@@ -37,6 +37,11 @@ async function RegisterUser (req, res){
 async function LoginUser (req, res) {
     const { email, password } = req.body;
 
+    const projectId = req.project.id;
+    if(!projectId){
+        return res.status(403).json({error: "FORBIDDEN"});
+    }
+
     if(!email || !password){
         return res.status(400).json({error: "INVALID_DATA"});
     }
@@ -44,7 +49,7 @@ async function LoginUser (req, res) {
     const normalizedEmail = email.toLowerCase().trim();
 
     try {
-        const result = await db.query("SELECT id, password_hashed FROM users WHERE email=$1", [normalizedEmail]);
+        const result = await db.query("SELECT id, password_hashed FROM users WHERE email=$1 and project_id=$2", [normalizedEmail, projectId]);
         
         if(result.rows.length === 0){
             return res.status(401).json({error: "INVALID_CREDENTIALS"});
@@ -59,8 +64,8 @@ async function LoginUser (req, res) {
             return res.status(401).json({error: "INVALID_CREDENTIALS"});
         }
         
-        const accessToken = jwt.sign({userId, type:"access"}, process.env.ACCESS_SECRET_KEY, {expiresIn : '15m'});
-        const refreshToken = jwt.sign({userId, type:"refresh"}, process.env.REFRESH_SECRET_KEY, {expiresIn : '7d'});
+        const accessToken = jwt.sign({userId, projectId,type:"access"}, process.env.ACCESS_SECRET_KEY, {expiresIn : '15m'});
+        const refreshToken = jwt.sign({userId, projectId, type:"refresh"}, process.env.REFRESH_SECRET_KEY, {expiresIn : '7d'});
 
         const refreshHashed = await bcrypt.hash(refreshToken, SALT_ROUNDS);
 
@@ -78,6 +83,12 @@ async function RefreshAccessToken (req, res) {
     if(!incomingRefreshToken){
         return res.status(401).json({error: "UNAUTHORISED_ACCESS"});
     }
+
+    const projectId = req.project.id;
+    if(!projectId){
+        return res.status(403).json({error: "FORBIDDEN"});
+    }
+
     try {
         const decoded = jwt.verify(incomingRefreshToken, process.env.REFRESH_SECRET_KEY);
 
@@ -85,10 +96,20 @@ async function RefreshAccessToken (req, res) {
             return res.status(401).json({error: "UNAUTHORISED_ACCESS"});
         }
         const userId = decoded.userId;
-        console.log(userId)
-        const result = await db.query("SELECT refresh_token_hashed FROM users WHERE id=$1", [userId]);
+        const projectIdFromToken = decoded.projectId;
+        
+        if(projectIdFromToken !== projectId){
+            return res.status(403).json({error: "FORBIDDEN"});
+        }
+
+        const result = await db.query("SELECT refresh_token_hashed, project_id FROM users WHERE id=$1", [userId]);
         if(result.rows.length === 0){
             return res.status(401).json({error: "UNAUTHORISED_ACCESS"});
+        }
+
+        const userProjectId = result.rows[0].project_id;
+        if(userProjectId !== projectId){
+            return res.status(403).json({error: "FORBIDDEN"});
         }
 
         const storedRefreshToken = result.rows[0].refresh_token_hashed;
@@ -103,8 +124,8 @@ async function RefreshAccessToken (req, res) {
             return res.status(401).json({error: "UNAUTHORISED_ACCESS"});
         }
 
-        const accessToken = jwt.sign({userId, type:"access"}, process.env.ACCESS_SECRET_KEY, {expiresIn : '15m'});
-        const refreshToken = jwt.sign({userId, type:"refresh"}, process.env.REFRESH_SECRET_KEY, {expiresIn : '7d'});  
+        const accessToken = jwt.sign({userId, projectId, type:"access"}, process.env.ACCESS_SECRET_KEY, {expiresIn : '15m'});
+        const refreshToken = jwt.sign({userId, projectId, type:"refresh"}, process.env.REFRESH_SECRET_KEY, {expiresIn : '7d'});  
         const hashedRefresh = await bcrypt.hash(refreshToken, SALT_ROUNDS);
 
         await db.query("UPDATE users SET refresh_token_hashed = $1 WHERE id=$2", [hashedRefresh, userId]);
